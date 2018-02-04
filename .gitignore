@@ -1,9 +1,7 @@
 *~
 .eunit
 .rebar
-deps
 *.o
-*.beam
 *.plt
 *.DS_Store
 *.aux
@@ -21,7 +19,6 @@ deps
 apps/*/logs
 apps/*/ebin
 apps/*/.eunit
-ebin/
 erl_crash.dump
 Mnesia*
 .DS_Store
@@ -30,3 +27,18 @@ Pods
 tapestry/src/ui/mobile/android/gen/android/
 tapestry/src/ui/mobile/android/gen/com/infoblox/tapestry/R.java
 .idea
+
+_build/
+.eunit
+*.o
+*.plt
+rel/example_project
+.concrete/DEV_MODE
+.rebar
+*.iml
+.idea
+log/
+*.pcap
+*.crashdump
+*.swp
+rebar.lock

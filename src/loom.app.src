@@ -1,0 +1,18 @@
+{application, loom, [
+    {description, "Erlang based SDN Controller"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, { loom_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        of_driver,
+        ofs_handler
+    ]},
+    {env,[]},
+    {modules, []},
+
+    {maintainers, []},
+    {licenses, ["Apache 2.0"]},
+    {links, []}
+]}.

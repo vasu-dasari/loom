@@ -1,36 +1,36 @@
-.PHONY: rel offline compile get-deps update-deps test clean deep-clean
+.PHONY: compile update clean deep-clean
 
-rel: compile
-	@./rebar generate -f
+all: compile
 
-offline:
-	@./rebar compile
-	@./rebar generate
+PROJECT_NAME := loom
 
-compile: get-deps update-deps
-	@./rebar compile
+include docker/Makefile
 
-beams:
-	@./rebar compile
+REBAR := $(EXEC_ARGS) rebar3
 
-get-deps:
-	@./rebar get-deps
+compile:
+	@$(EXEC) "$(REBAR) compile"
 
-update-deps:
-	@./rebar update-deps
-
-test: offline
-	@./rebar skip_deps=true apps="loom" eunit
+update:
+	@$(EXEC) "$(REBAR) update"
+	@$(EXEC) "$(REBAR) upgrade"
+	@$(EXEC) "$(REBAR) compile"
 
 clean:
-	@./rebar clean
+	@$(EXEC) "$(REBAR) clean"
 
 deep-clean: clean
-	@./rebar delete-deps
+	@rm -rf _build rebar.lock
 
-setup_dialyzer:
-	dialyzer --build_plt --apps erts kernel stdlib mnesia compiler syntax_tools runtime_tools crypto tools inets ssl webtool public_key observer
-	dialyzer --add_to_plt deps/*/ebin
+SHELL_ARGS := ERL_FLAGS=\" -args_file config/vm.args -config config/sys.config\" rebar3 shell
+run:
+ifeq ($(MAKECMDGOALS),up)
+	@$(EXEC) "$(EXEC_ARGS) $(SHELL_ARGS)"
+else
+	@$(EXEC) "$(EXEC_ARGS) $(SHELL_ARGS) $(filter-out $@,$(MAKECMDGOALS))"
+endif
 
-dialyzer: compile
-	dialyzer */apps/*/ebin
+%:
+	@:
+
+.SILENT:

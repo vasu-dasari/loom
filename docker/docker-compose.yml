@@ -1,0 +1,71 @@
+version: '2.1'
+
+services:
+  main:
+    image: vdasari/erlango:latest
+    container_name: loom
+    hostname: loom
+    volumes:
+        - ${HOME}:${HOME}
+    ports:
+      - "6653:6653"
+    privileged: true
+    networks:
+      default_loom_net:
+        ipv4_address: 10.3.123.10
+
+  switch1:
+    image: vdasari/ovs-mn-ryu:latest
+    container_name: switch1
+    hostname: switch1
+    volumes:
+      - ${HOME}:${HOME}
+    ports:
+      - "10001:8080"
+    entrypoint: |
+      bash -c 'bash -s <<EOF
+      service openvswitch-switch start
+      sleep infinity
+      EOF'
+    privileged: true
+    networks:
+      default_loom_net:
+        ipv4_address: 10.3.123.20
+      network_loom_1:
+        ipv4_address: 10.3.100.1
+
+  switch2:
+    image: vdasari/ovs-mn-ryu:latest
+    container_name: switch2
+    hostname: switch2
+    volumes:
+      - ${HOME}:${HOME}
+    ports:
+      - "10002:8080"
+    entrypoint: |
+      bash -c 'bash -s <<EOF
+      service openvswitch-switch start
+      sleep infinity
+      EOF'
+    privileged: true
+    networks:
+      default_loom_net:
+        ipv4_address: 10.3.123.30
+      network_loom_1:
+        ipv4_address: 10.3.100.2
+
+networks:
+  default_loom_net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 10.3.123.0/24
+        gateway: 10.3.123.254
+  network_loom_1:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 10.3.100.0/24
+        gateway: 10.3.100.254
