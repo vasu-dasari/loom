@@ -15,6 +15,9 @@
 
 -define(SERVER, ?MODULE).
 
+-define(Process(Name, Type),
+    {Name, {Name, start_link, []}, permanent, 2000, Type, [Name]}).
+
 %%====================================================================
 %% API functions
 %%====================================================================
@@ -28,7 +31,18 @@ start_link() ->
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
-    {ok, { {one_for_all, 0, 1}, []} }.
+    RestartStrategy = one_for_one,
+    MaxRestarts = 3,
+    MaxSecondsBetweenRestarts = 5,
+
+    SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
+
+    _Restart = permanent,
+    _Shutdown = 2000,
+    _Type = worker,
+    {ok, {SupFlags, [
+        ?Process(loom_logic, worker)
+    ]}}.
 
 %%====================================================================
 %% Internal functions

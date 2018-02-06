@@ -13,7 +13,6 @@
 
 -include("logger.hrl").
 -include("loom_api.hrl").
--include_lib("ofs_handler/include/ofs_handler.hrl").
 -include_lib("of_protocol/include/of_protocol.hrl").
 
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -42,6 +41,7 @@
 
 -export([filter/4]).
 
+-define(AppName, loom).
 -define(EtsLoom, ets_loom).
 -define(SERVER, ?MODULE).
 
@@ -53,12 +53,13 @@
     default_switch :: switch_key()
 }).
 
--record(switch_info_t, {
+-record(loom_switch_info_t, {
     key             :: {id, integer()},
     ip_addr,
     datapath_id,
     version,
     filters = #{},
+    clients = #{},
     connection
 }).
 
@@ -319,9 +320,9 @@ process_call(Request, State) when element(1, Request) == init ->
     self() ! {register, Request},
     {reply, ok, State};
 process_call({terminate, DatapathId}, #loom_logic_state{switches_table = Table} = State) ->
-    case ets:match_object(Table, #switch_info_t{datapath_id = DatapathId, _='_'}) of
-        [#switch_info_t{} = SwitchInfo] ->
-            NewSwitchInfo = SwitchInfo#switch_info_t{connection = down},
+    case find_switch(DatapathId, State) of
+        #loom_switch_info_t{} = SwitchInfo ->
+            NewSwitchInfo = SwitchInfo#loom_switch_info_t{connection = down},
             ets:insert(Table, NewSwitchInfo),
             self() ! {unregister, NewSwitchInfo};
         _ ->
@@ -330,7 +331,7 @@ process_call({terminate, DatapathId}, #loom_logic_state{switches_table = Table} 
     {reply, ok, State};
 
 process_call({sync_send, SwitchKey, Msg}, State) when is_record(Msg, ofp_message) ->
-    {reply, do_sync_send(SwitchKey, Msg, State), State};
+    {reply, do_sync_send(find_switch(SwitchKey, State), Msg, State), State};
 process_call({sync_send, SwitchKey, Msg}, State) ->
     {reply, do_sync_send_api(sync, find_switch(SwitchKey, State), Msg, State), State};
 
@@ -345,7 +346,7 @@ process_call({ofs_version, SwitchKey}, State) ->
     {reply, do_get_version(SwitchKey, State), State};
 process_call(switches, State) ->
     Reply = [{SwitchKey, DatapathId, IpAddr, Version, Connection} ||
-        #switch_info_t{
+        #loom_switch_info_t{
             key = SwitchKey,
             datapath_id = DatapathId,
             ip_addr = IpAddr,
@@ -372,8 +373,8 @@ process_info_msg({init}, State) ->
     }};
 
 process_info_msg({initialize,
-    #switch_info_t{
-        key = SwitchId, datapath_id = DatapathId, version = Version, ip_addr = IpAddress
+    #loom_switch_info_t{
+        key = SwitchId
     } = SwitchInfo}, State) ->
 
     do_default_flows(SwitchInfo, State),
@@ -391,14 +392,14 @@ process_info_msg(Request, State) ->
     ?INFO("info: Request~n~p", [Request]),
     {noreply, State}.
 
-do_default_flows(#switch_info_t{key = SwitchId, version = Version}, State) ->
+do_default_flows(#loom_switch_info_t{key = SwitchId, version = Version}, State) ->
     Request = of_msg_lib:flow_add(
         Version,
         [],                         %% Matches: any port
         [{apply_actions, [          %% Actions: Send such a packet to controller
             {output, 'controller', no_buffer}
         ]}],
-        [{priority, 16#ffff}]       %% Priority of 16#ffff
+        []       %% Priority of 16#0
     ),
     do_sync_send(SwitchId, Request, State).
 
@@ -411,14 +412,18 @@ do_register({init, IpAddress, DatapathId, Version, Connection},
             switches_table = Switches,
             next_switch_key = SwitchId
         }) ->
-    SwitchInfo = #switch_info_t{
+    SwitchInfo = #loom_switch_info_t{
         key = SwitchId,
         ip_addr = IpAddress,
         datapath_id = DatapathId,
         version = Version,
         connection = Connection
     },
-    true = ets:insert(Switches, SwitchInfo),
+
+    true = ets:insert(Switches,
+        SwitchInfo#loom_switch_info_t{
+            clients = do_start_apps(SwitchInfo)
+        }),
 
     do_default_flows(SwitchInfo, State),
 
@@ -429,48 +434,93 @@ do_register({init, IpAddress, DatapathId, Version, Connection},
     }.
 
 do_unregister(
-    #switch_info_t{
-        key = SwitchId
+    #loom_switch_info_t{
+        key = SwitchId,
+        clients = Clients
     } = _SwitchInfo, #loom_logic_state{switches_table = Table} = State) ->
+
+    do_stop_apps(Clients),
 
     true = ets:delete(Table, SwitchId),
     State.
 
-find_switch(default, #loom_logic_state{default_switch = undefined}) ->
-    {error, no_default};
-find_switch(default, State = #loom_logic_state{default_switch = DefaultKey}) ->
-    find_switch(DefaultKey, State);
-find_switch(SwitchKey, #loom_logic_state{switches_table = Switches}) ->
-    case ets:lookup(Switches, SwitchKey) of
-        [] -> not_found;
-        [SwitchRecord = #switch_info_t{}] -> SwitchRecord
+do_start_apps(
+        #loom_switch_info_t{
+            key = SwitchId,
+            ip_addr = IpAddress,
+            datapath_id = DatapathId,
+            version = Version
+        }) ->
+    case application:get_env(?AppName, apps) of
+        {ok, Apps} ->
+            lists:foldl(fun
+                (AppName, Acc) ->
+                    Ret = AppName:start(#switch_info_t{
+                        switch_id = SwitchId,
+                        datapath_id = DatapathId,
+                        version = Version,
+                        ip_addr = IpAddress
+                    }),
+                    case Ret of
+                        {ok, Pid} ->
+                            Acc#{AppName => Pid};
+                        _ ->
+                            Acc
+                    end
+            end, #{}, Apps);
+        _ ->
+            #{}
     end.
+
+do_stop_apps(AppInfo) when is_map(AppInfo) ->
+    lists:foreach(fun
+        ({Mod, Arg}) ->
+            ?INFO("~p: Stopping ~p, ~p", [?MODULE, Mod, Arg]),
+            Mod:stop(Arg)
+    end, maps:to_list(AppInfo)).
+
+find_switch(Key, State) ->
+    case do_find_switch(Key, State) of
+        [#loom_switch_info_t{} = S] ->
+            S;
+        _ ->
+            not_found
+    end.
+
+do_find_switch(default, #loom_logic_state{default_switch = undefined}) ->
+    {error, no_default};
+do_find_switch(default, State = #loom_logic_state{default_switch = DefaultKey}) ->
+    find_switch(DefaultKey, State);
+do_find_switch(DatapathId, #loom_logic_state{switches_table = Table}) when is_list(DatapathId) ->
+    ets:match_object(Table, #loom_switch_info_t{datapath_id = DatapathId, _ = '_'});
+do_find_switch(SwitchKey, #loom_logic_state{switches_table = Switches}) ->
+    ets:lookup(Switches, SwitchKey).
 
 do_get_switches(#loom_logic_state{switches_table = Switches}) ->
     ets:tab2list(Switches).
 
 do_get_version(Error = {error, _}, _State) ->
     Error;
-do_get_version(#switch_info_t{version = Version}, _State) ->
+do_get_version(#loom_switch_info_t{version = Version}, _State) ->
     Version;
 do_get_version(SwitchKey, State) ->
     do_get_version(find_switch(SwitchKey, State), State).
 
 do_set_default(Error = {error, _}, State) ->
     {Error, State};
-do_set_default(#switch_info_t{key = DefaultKey}, State) ->
+do_set_default(#loom_switch_info_t{key = DefaultKey}, State) ->
     {ok, State#loom_logic_state{default_switch = DefaultKey}};
 do_set_default(SwitchKey, State) ->
     do_set_default(find_switch(SwitchKey, State), State).
 
 do_close_connection(Error = {error, _}, _State) ->
     Error;
-do_close_connection(#switch_info_t{datapath_id = DatapathId}, _State) ->
+do_close_connection(#loom_switch_info_t{datapath_id = DatapathId}, _State) ->
     ofs_handler:terminate(DatapathId);
 do_close_connection(SwitchKey, State) ->
     do_close_connection(find_switch(SwitchKey, State), State).
 
-do_sync_send_api(_, #switch_info_t{version = Version} = SwitchInfo, Msg, State) ->
+do_sync_send_api(_, #loom_switch_info_t{version = Version} = SwitchInfo, Msg, State) ->
     {Function, Args} = case Msg of
         [F|A] ->
             {F, A};
@@ -490,9 +540,9 @@ do_sync_send_api(_, #switch_info_t{version = Version} = SwitchInfo, Msg, State) 
 
 do_sync_send(Error = not_found, _Msg, _State) ->
     Error;
-do_sync_send(#switch_info_t{connection = down}, _Msg, _State) ->
+do_sync_send(#loom_switch_info_t{connection = down}, _Msg, _State) ->
     ok;
-do_sync_send(#switch_info_t{datapath_id = DatapathId}, Msg, _State) ->
+do_sync_send(#loom_switch_info_t{datapath_id = DatapathId} = I, Msg, _State) ->
     ofs_handler:sync_send(DatapathId, Msg);
 do_sync_send(SwitchKey, Msg, State) ->
     do_sync_send(find_switch(SwitchKey, State), Msg, State).
@@ -501,9 +551,9 @@ do_subscribe(Error = {error, _}, _Msg, _State) ->
     Error;
 do_subscribe(_, [], _) ->
     ok;
-do_subscribe(SwitchInfo, [H|R], State) when is_record(SwitchInfo, switch_info_t) ->
+do_subscribe(SwitchInfo, [H|R], State) when is_record(SwitchInfo, loom_switch_info_t) ->
     do_subscribe(SwitchInfo, H, State), do_subscribe(SwitchInfo, R, State);
-do_subscribe(#switch_info_t{datapath_id = DatapathId}, MsgType, _State) ->
+do_subscribe(#loom_switch_info_t{datapath_id = DatapathId}, MsgType, _State) ->
     ofs_handler:subscribe(DatapathId, loom_ofsh, MsgType);
 do_subscribe(SwitchKey, MsgType, State) ->
     do_subscribe(find_switch(SwitchKey, State), MsgType, State).

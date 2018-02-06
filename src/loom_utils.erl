@@ -14,7 +14,10 @@
 -export([]).
 
 %% API
--export([pretty_print/1, record_to_proplist/1, record_to_proplist/2]).
+-export([pretty_print/1, record_to_proplist/1, record_to_proplist/2, proc_name/2]).
+
+proc_name(Module, #switch_info_t{switch_id = SwitchId}) ->
+    list_to_atom(atom_to_list(Module) ++ "_" ++ integer_to_list(SwitchId)).
 
 pretty_print(Item) ->
     io_lib:format("~s",[io_lib_pretty:print(Item)]).
@@ -39,6 +42,7 @@ record_to_proplist({}) -> [];
 ?R2P(loom_pkt_desc_t);
 ?R2P(loom_notification_t);
 ?R2P(loom_event_t);
+?R2P(switch_info_t);
 record_to_proplist(List) when is_list(List) ->
     lists:foldr(fun
         (Entry, Acc) ->

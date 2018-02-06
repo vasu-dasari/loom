@@ -1,0 +1,16 @@
+{application, l2switch, [
+    {description, "L2 Switching application for Loom"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, { l2switch_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        loom
+    ]},
+    {env,[]},
+    {modules, []},
+    {maintainers, []},
+    {licenses, ["Apache 2.0"]},
+    {links, []}
+]}.

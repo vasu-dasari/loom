@@ -8,6 +8,10 @@
 %%%-------------------------------------------------------------------
 -author("vdasari").
 
+-include_lib("ofs_handler/include/ofs_handler.hrl").
+
+-type switch_id()   :: non_neg_integer().
+
 -record(loom_pkt_desc_t, {
     src_mac = dont_care,
     dst_mac = dont_care,
@@ -23,4 +27,12 @@
 -record(loom_event_t, {
     key :: atom(),
     dp_list = #{}
+}).
+
+-record(switch_info_t, {
+    switch_id   :: switch_id(),
+    ip_addr     :: ipaddress(),
+    datapath_id :: datapath_id(),
+    version     :: of_version()
+
 }).
