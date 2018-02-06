@@ -67,7 +67,6 @@ init([]) ->
     ]}}.
 
 start_child(ProcName, Arg) ->
-    ?INFO("start_child: ~p, ~p", [ProcName, Arg]),
     case whereis(ProcName) of
         undefined ->
             do_add_child(ProcName, Arg);
