@@ -39,6 +39,8 @@
     show_default/0,
     ofs_version/1, subscribe/2]).
 
+-export([get_switch/1]).
+
 -export([filter/4]).
 
 -define(AppName, loom).
@@ -164,14 +166,17 @@ handle_packet_in(DatapathId, InPort, <<DstMac:6/bytes, SrcMac:6/bytes, EtherType
                 ->
                 P
         end)) of
-        [DpMap] ->
+        DpList when is_list(DpList) ->
             ?DEBUG("Rx Packet on ~p: ~p", [InPort, EtherType]),
-            case maps:get(DatapathId, DpMap, []) of
-                [] ->
-                    ok;
-                Pid ->
-                    Pid ! {rx_packet, InPort, PktData}
-            end;
+            lists:foreach(fun
+                (DpMap) ->
+                    case maps:get(DatapathId, DpMap, []) of
+                        [] ->
+                            ok;
+                        Pid ->
+                            Pid ! {rx_packet, InPort, PktData}
+                    end
+            end, DpList);
         _ ->
             ok
     end.
@@ -245,6 +250,9 @@ subscribe(SwitchKey, MsgType) ->
 
 filter(Op, SwitchId, Filter, Pid) ->
     gen_server:call(?SERVER, {filter, Op, SwitchId, Filter, Pid}).
+
+get_switch(Key) ->
+    gen_server:call(?SERVER, {switch, get, Key}).
 
 %%%===================================================================
 %%% API
@@ -358,6 +366,20 @@ process_call({subscribe, SwitchKey, MsgType}, State) ->
     {reply, do_subscribe(SwitchKey, MsgType, State), State};
 process_call({filter, Op, DatapathId, Filter, Pid}, State) ->
     {reply, do_filter(Op, DatapathId, Filter, Pid, State), State};
+process_call({switch, get, Key}, State) ->
+    SwitchInfo = case find_switch(Key, State) of
+        #loom_switch_info_t{} = LoomSwitchInfo ->
+            #switch_info_t{
+                switch_id = LoomSwitchInfo#loom_switch_info_t.key,
+                datapath_id =  LoomSwitchInfo#loom_switch_info_t.datapath_id,
+                ip_addr =  LoomSwitchInfo#loom_switch_info_t.ip_addr,
+                version =  LoomSwitchInfo#loom_switch_info_t.version
+            };
+        _ ->
+            not_found
+    end,
+    {reply, SwitchInfo, State};
+
 process_call(Request, State) ->
     ?INFO("call: Unhandled Request ~p", [Request]),
     {reply, ok, State}.
@@ -399,7 +421,7 @@ do_default_flows(#loom_switch_info_t{key = SwitchId, version = Version}, State) 
         [{apply_actions, [          %% Actions: Send such a packet to controller
             {output, 'controller', no_buffer}
         ]}],
-        []       %% Priority of 16#0
+        [{priority,0}]       %% Priority of 16#0
     ),
     do_sync_send(SwitchId, Request, State).
 
@@ -542,7 +564,7 @@ do_sync_send(Error = not_found, _Msg, _State) ->
     Error;
 do_sync_send(#loom_switch_info_t{connection = down}, _Msg, _State) ->
     ok;
-do_sync_send(#loom_switch_info_t{datapath_id = DatapathId} = I, Msg, _State) ->
+do_sync_send(#loom_switch_info_t{datapath_id = DatapathId}, Msg, _State) ->
     ofs_handler:sync_send(DatapathId, Msg);
 do_sync_send(SwitchKey, Msg, State) ->
     do_sync_send(find_switch(SwitchKey, State), Msg, State).

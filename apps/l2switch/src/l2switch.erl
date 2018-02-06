@@ -32,6 +32,7 @@
 -define(version(State),     (State#state.switch_info)#switch_info_t.version).
 -define(switch_id(State),   (State#state.switch_info)#switch_info_t.switch_id).
 -define(datapath_id(State), (State#state.switch_info)#switch_info_t.datapath_id).
+-define(ip_address(State), (State#state.switch_info)#switch_info_t.ip_addr).
 
 -record(state, {
     switch_info,
@@ -54,10 +55,8 @@ start(SwitchInfo) ->
     l2switch_sup:start_child(loom_utils:proc_name(?MODULE, SwitchInfo), SwitchInfo).
 
 stop(Pid) when is_pid(Pid) ->
-    ?INFO("Stopping ~p: Switch ~p", [?MODULE, Pid]),
     l2switch_sup:stop_child(Pid);
-stop(SwitchInfo) ->
-    ?INFO("Stopping ~p: Switch ~p", [?MODULE, SwitchInfo]),
+stop(_) ->
     ok.
 
 start_link(ProcName, SwitchInfo) ->
@@ -174,9 +173,13 @@ process_info_msg(Request, State) ->
 do_process_rx_packet(PortId, Packet, #state{l2_table = L2Table} = State) ->
     PktDecode = pkt:decapsulate(Packet),
 
-    ?DEBUG("Packet ~n~p", [PktDecode]),
+    ?DEBUG("~p(~s): Packet ~n~s", [
+        PortId, port2str(PortId, State),
+        loom_utils:record_to_proplist(to_str,PktDecode)
+    ]),
+
     {SrcMac, DstMac, VlanId} = case PktDecode of
-        [#ether{shost = S, dhost = D, type = 16#8100}, #ieee802_1q_tag{vid = V} | _] ->
+        [#ether{shost = S, dhost = D, type = 16#8100}, #'802.1q'{vid = V} | _] ->
             {S, D, V};
         [#ether{shost = S, dhost = D} | _] ->
             {S, D, 0}
@@ -184,15 +187,19 @@ do_process_rx_packet(PortId, Packet, #state{l2_table = L2Table} = State) ->
 
     case do_learn_mac(PortId, SrcMac, VlanId, State) of
         ok ->
-            do_forward_packet(DstMac, VlanId, Packet, State);
+            case do_skip_packet(PktDecode) of
+                true ->
+                    ok;
+                _ ->
+                    do_forward_packet(DstMac, VlanId, Packet, State)
+            end,
+            State#state{
+                l2_table = L2Table#{{SrcMac, VlanId} => PortId},
+                rx_packets = ?incr_rx_packets(State)
+            };
         _ ->
-            ok
-    end,
-
-    State#state{
-        l2_table = L2Table#{{SrcMac, VlanId} => PortId},
-        rx_packets = ?incr_rx_packets(State)
-    }.
+            State
+    end.
 
 do_forward_packet(DstMac, VlanId, Packet, #state{l2_table = L2Table} = State) ->
     case maps:get({DstMac, VlanId}, L2Table, []) of
@@ -227,4 +234,20 @@ do_learn_mac(PortId, SrcMac, VlanId, #state{l2_table = L2Table} = State) ->
             mac_move;
         _ ->
             ok
+    end.
+
+do_skip_packet(PktDecode) ->
+    lists:foldl(fun
+        (#lldp{}, false) ->
+            true;
+        (_, Acc) ->
+            Acc
+    end, false, PktDecode).
+
+port2str(PortId, #state{if_list = IfList}) ->
+    case maps:get(PortId, IfList, []) of
+        #port_info_t{name = N} ->
+            binary_to_list(N);
+        _ ->
+            "none"
     end.
