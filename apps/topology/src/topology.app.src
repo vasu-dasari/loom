@@ -1,0 +1,17 @@
+{application, topology, [
+    {description, "Topology discovery app for Loom"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, { topology_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        lldp,
+        loom
+    ]},
+    {env,[]},
+    {modules, []},
+    {maintainers, []},
+    {licenses, ["Apache 2.0"]},
+    {links, []}
+]}.
