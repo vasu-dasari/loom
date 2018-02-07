@@ -130,6 +130,7 @@ handle_message(Message, State) ->
 
 notify(Op, IfName, EntityInfo, State) ->
     ?INFO("~p Neighbor on ~p~n~s", [Op,IfName, lldp_utils:record_to_proplist(to_str, EntityInfo)]),
+    topology:notify({Op, ?datapath_id(State), IfName, EntityInfo}),
     {ok, State}.
 
 info(_Request, _State) ->

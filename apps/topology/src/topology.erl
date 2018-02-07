@@ -13,7 +13,7 @@
 
 -include_lib("loom/include/loom_api.hrl").
 %% API
--export([start/1, stop/1, neighbor/2]).
+-export([start/1, stop/1, neighbor/2, register/1, unregister/1, notify/1]).
 
 %%%===================================================================
 %%% loom_interface callbacks
@@ -37,4 +37,19 @@ neighbor(DatapathId, Key) ->
             lldp_manager:get_neighbors(loom_utils:proc_name(?MODULE, SwitchInfo), Key);
         _ ->
             not_found
+    end.
+
+register(Pid) ->
+    pg2:create(loom_topology),
+    pg2:join(loom_topology, Pid).
+
+unregister(Pid) ->
+    pg2:leave(loom_topology, Pid).
+
+notify(Message) ->
+    case pg2:get_local_members(loom_topology) of
+        {error, _} ->
+            ok;
+        Pids ->
+            [Pid ! {?MODULE, Message} || Pid <- Pids]
     end.
