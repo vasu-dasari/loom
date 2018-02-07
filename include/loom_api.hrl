@@ -34,5 +34,10 @@
     ip_addr     :: ipaddress(),
     datapath_id :: datapath_id(),
     version     :: of_version()
+}).
 
+-record(port_info_t, {
+    name,
+    port_no,
+    state
 }).

@@ -12,7 +12,7 @@
 -include_lib("ofs_handler/include/ofs_handler.hrl").
 -include_lib("of_protocol/include/of_protocol.hrl").
 
--include("logger.hrl").
+-include_lib("loom/include/logger.hrl").
 
 -export([
     init/7,
@@ -38,10 +38,11 @@
 % callbacks from ofs_handler
 % The callback functions in turn call loom_logic for processing.
 -spec init(handler_mode(), ipaddress(), datapath_id(), features(), of_version(), connection(), options()) -> {ok, ofs_state()}.
-init(Mode, IpAddr, DatapathId, _Features, Version, Connection, _Opts) ->
-    ok = loom_logic:ofsh_init(Mode, IpAddr, DatapathId, Version, Connection),
+init(Mode, IpAddr, DatapathId, Features, Version, Connection, _Opts) ->
+    ok = loom_logic:ofsh_init(Mode, IpAddr, DatapathId, Features, Version, Connection),
     State = #loom_ofs_state{datapath_id = DatapathId},
     {ok, State}.
+
 
 -spec connect(handler_mode(), ipaddress(), datapath_id(), features(), of_version(), connection(), auxid(), options()) -> {ok, ofs_state()}.
 connect(Mode, IpAddr, DatapathId, _Features, Version, Connection, AuxId, _Opts) ->

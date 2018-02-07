@@ -9,7 +9,7 @@
 -module(loom_interface).
 -author("vdasari").
 
--include("loom_api.hrl").
+-include_lib("loom/include/loom_api.hrl").
 
 -callback start(SwitchInfo :: #switch_info_t{}) ->
     {'ok', Pid::pid()} | {'ok'} | {'ok', State::term()} | {'error', Reason::term()}.

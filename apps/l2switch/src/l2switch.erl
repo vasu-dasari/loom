@@ -42,12 +42,6 @@
     tx_packets = 0
 }).
 
--record(port_info_t, {
-    name,
-    port_no,
-    state
-}).
-
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -135,27 +129,14 @@ process_cast(Request, State) ->
     ?INFO("cast: Request~n~p", [Request]),
     {noreply, State}.
 
-process_info_msg({init}, #state{switch_info = #switch_info_t{switch_id = SwitchId, datapath_id = DatapathId}} = State) ->
+process_info_msg({init}, #state{switch_info = #switch_info_t{datapath_id = DatapathId}} = State) ->
     ?INFO("Initializing switch~n~p", [State]),
     loom_logic:filter(add, DatapathId,
         #loom_pkt_desc_t{
         }, self()),
 
-    {port_desc_reply, _, [{flags,_}, {ports,PortList}]} =
-        loom_logic:sync_send(SwitchId, get_port_descriptions),
-    IfList = lists:foldl(fun
-        (PropList, Acc) ->
-            PortId = proplists:get_value(port_no, PropList),
-            Acc#{
-                PortId => #port_info_t{
-                    name = proplists:get_value(name, PropList),
-                    port_no = PortId,
-                    state = lists:member(live, proplists:get_value(state, PropList, []))
-                }
-            }
-    end, #{}, PortList),
     {noreply, State#state{
-        if_list = IfList
+        if_list = loom_logic:get_ports_info(DatapathId)
     }};
 
 process_info_msg({rx_packet, PortId, Packet}, State) ->
@@ -164,11 +145,6 @@ process_info_msg({rx_packet, PortId, Packet}, State) ->
 process_info_msg(Request, State) ->
     ?INFO("info: Request~n~p", [Request]),
     {noreply, State}.
-
--record(l2_entry_t, {
-    key :: {binary(), non_neg_integer()},
-    port_id
-}).
 
 do_process_rx_packet(PortId, Packet, #state{l2_table = L2Table} = State) ->
     PktDecode = pkt:decapsulate(Packet),
