@@ -11,8 +11,8 @@
 
 -behaviour(gen_server).
 
--include("logger.hrl").
--include("loom_api.hrl").
+-include_lib("loom/include/loom_api.hrl").
+-include_lib("loom/include/logger.hrl").
 -include_lib("of_protocol/include/of_protocol.hrl").
 
 -include_lib("stdlib/include/ms_transform.hrl").
@@ -24,7 +24,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -export([
-    ofsh_init/5,
+    ofsh_init/6,
     ofsh_connect/6,
     ofsh_disconnect/2,
     ofsh_failover/0,
@@ -39,7 +39,7 @@
     show_default/0,
     ofs_version/1, subscribe/2]).
 
--export([get_switch/1]).
+-export([get_switch/1, get_ports_info/1]).
 
 -export([filter/4]).
 
@@ -62,6 +62,7 @@
     version,
     filters = #{},
     clients = #{},
+    ports_map = #{},
     connection
 }).
 
@@ -70,13 +71,13 @@
 %% ----------------------------------------------------------------------------
 
 % These functions are called from loom_ofsh.erl.
--spec ofsh_init(handler_mode(), ipaddress(), datapath_id(), of_version(), connection()) -> ok.
-ofsh_init(active, IpAddr, DatapathId, Version, Connection) ->
+-spec ofsh_init(handler_mode(), ipaddress(), datapath_id(), features(), of_version(), connection()) -> ok.
+ofsh_init(active, IpAddr, DatapathId, Features, Version, Connection) ->
     % new main connection
     ?INFO("Switch discvered at ~s, Datapath Id ~s~n", [
         inet_utils:convert_ip(to_string,IpAddr), DatapathId
     ]),
-    ok = gen_server:call(?MODULE, {init, IpAddr, DatapathId, Version, Connection}),
+    ok = gen_server:call(?MODULE, {init, IpAddr, DatapathId, Features, Version, Connection}),
     ok.
 
 -spec ofsh_connect(handler_mode(), ipaddress(), datapath_id(), of_version(), connection(), auxid()) -> ok.
@@ -254,6 +255,9 @@ filter(Op, SwitchId, Filter, Pid) ->
 get_switch(Key) ->
     gen_server:call(?SERVER, {switch, get, Key}).
 
+get_ports_info(Key) ->
+    gen_server:call(?SERVER, {get_ports_info, Key}).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -366,6 +370,8 @@ process_call({subscribe, SwitchKey, MsgType}, State) ->
     {reply, do_subscribe(SwitchKey, MsgType, State), State};
 process_call({filter, Op, DatapathId, Filter, Pid}, State) ->
     {reply, do_filter(Op, DatapathId, Filter, Pid, State), State};
+process_call({get_ports_info, Key}, State) ->
+    {reply, do_get_ports_info(find_switch(Key, State), State), State};
 process_call({switch, get, Key}, State) ->
     SwitchInfo = case find_switch(Key, State) of
         #loom_switch_info_t{} = LoomSwitchInfo ->
@@ -429,11 +435,13 @@ do_default_flows(#loom_switch_info_t{key = SwitchId, version = Version}, State) 
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-do_register({init, IpAddress, DatapathId, Version, Connection},
+do_register({init, IpAddress, DatapathId, Features, Version, Connection},
         State = #loom_logic_state{
             switches_table = Switches,
             next_switch_key = SwitchId
         }) ->
+    ?INFO("Features ~p", [Features]),
+    ?INFO("Features: decode ~p", [of_msg_lib:decode(Version,Features)]),
     SwitchInfo = #loom_switch_info_t{
         key = SwitchId,
         ip_addr = IpAddress,
@@ -444,7 +452,8 @@ do_register({init, IpAddress, DatapathId, Version, Connection},
 
     true = ets:insert(Switches,
         SwitchInfo#loom_switch_info_t{
-            clients = do_start_apps(SwitchInfo)
+            clients = do_start_apps(SwitchInfo),
+            ports_map = do_get_ports_info(SwitchInfo, State)
         }),
 
     do_default_flows(SwitchInfo, State),
@@ -542,6 +551,15 @@ do_close_connection(#loom_switch_info_t{datapath_id = DatapathId}, _State) ->
 do_close_connection(SwitchKey, State) ->
     do_close_connection(find_switch(SwitchKey, State), State).
 
+do_sync_send_api(_, SwitchInfo, Msg, State) when is_record(Msg, ofp_message)->
+    case do_sync_send(SwitchInfo, Msg, State) of
+        {ok, OfpMsg} when is_record(OfpMsg, ofp_message) ->
+            of_msg_lib:decode(OfpMsg);
+        {ok, _} ->
+            ok;
+        R ->
+            R
+    end;
 do_sync_send_api(_, #loom_switch_info_t{version = Version} = SwitchInfo, Msg, State) ->
     {Function, Args} = case Msg of
         [F|A] ->
@@ -623,3 +641,24 @@ do_filter(add, DatapathId, PktDesc, Pid, #loom_logic_state{switches_table = Tabl
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
+do_get_ports_info(
+        #loom_switch_info_t{
+            version = Version
+        } = SwitchInfo, State) ->
+    {port_desc_reply, _, [{flags, _}, {ports, PortList}]} =
+        do_sync_send_api(sync, SwitchInfo,
+            of_msg_lib:get_port_descriptions(Version), State),
+
+    lists:foldl(fun
+        (PropList, Acc) ->
+            PortId = proplists:get_value(port_no, PropList),
+            Acc#{
+                PortId => #port_info_t{
+                    name = proplists:get_value(name, PropList),
+                    port_no = PortId,
+                    state = lists:member(live, proplists:get_value(state, PropList, []))
+                }
+            }
+    end, #{}, PortList);
+do_get_ports_info(_, _) ->
+    #{}.
