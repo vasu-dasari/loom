@@ -134,12 +134,12 @@ handle_port_status(DatapathId, Reason, PortDesc) ->
                 P
         end)) of
         [DpMap] ->
-            ?INFO("~s: Event on ~p: Reason ~p, ~p~n~p", [DatapathId, InPort, Reason, PortDesc, DpMap]),
+            ?DEBUG("~s: Event on ~p: Reason ~p, ~p~n~p", [DatapathId, InPort, Reason, PortDesc, DpMap]),
             case maps:get(DatapathId, DpMap, []) of
                 [] ->
                     ok;
                 Pid ->
-                    ?INFO("Event on ~p: Reason ~p, ~p", [InPort, Reason, Pid]),
+                    ?DEBUG("Event on ~p: Reason ~p, ~p", [InPort, Reason, Pid]),
                     Pid ! {notify, port_status, InPort, Reason, PortDesc}
             end;
         _ ->
@@ -435,13 +435,11 @@ do_default_flows(#loom_switch_info_t{key = SwitchId, version = Version}, State) 
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-do_register({init, IpAddress, DatapathId, Features, Version, Connection},
+do_register({init, IpAddress, DatapathId, _Features, Version, Connection},
         State = #loom_logic_state{
             switches_table = Switches,
             next_switch_key = SwitchId
         }) ->
-    ?INFO("Features ~p", [Features]),
-    ?INFO("Features: decode ~p", [of_msg_lib:decode(Version,Features)]),
     SwitchInfo = #loom_switch_info_t{
         key = SwitchId,
         ip_addr = IpAddress,
