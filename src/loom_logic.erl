@@ -440,8 +440,6 @@ do_register({init, IpAddress, DatapathId, _Features, Version, Connection},
             switches_table = Switches,
             next_switch_key = SwitchId
         }) ->
-    ?INFO("Features ~p", [Features]),
-    ?INFO("Features: decode ~p", [of_msg_lib:decode(Version,Features)]),
     SwitchInfo = #loom_switch_info_t{
         key = SwitchId,
         ip_addr = IpAddress,
