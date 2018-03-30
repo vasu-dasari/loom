@@ -1,7 +1,7 @@
-version: '2.1'
+version: '3.4'
 
 services:
-  main:
+  loom:
     image: vdasari/erlango:latest
     container_name: loom
     hostname: loom
@@ -32,7 +32,7 @@ services:
       default_loom_net:
         ipv4_address: 10.3.123.20
       network_loom_1:
-        ipv4_address: 10.3.100.1
+#        ipv4_address: 10.3.100.1
 
   switch2:
     image: vdasari/ovs-mn-ryu:latest
@@ -52,7 +52,7 @@ services:
       default_loom_net:
         ipv4_address: 10.3.123.30
       network_loom_1:
-        ipv4_address: 10.3.100.2
+#        ipv4_address: 10.3.100.2
 
 networks:
   default_loom_net:
@@ -61,11 +61,9 @@ networks:
       driver: default
       config:
       - subnet: 10.3.123.0/24
-        gateway: 10.3.123.254
   network_loom_1:
     driver: bridge
     ipam:
       driver: default
       config:
       - subnet: 10.3.100.0/24
-        gateway: 10.3.100.254
