@@ -24,7 +24,7 @@ deep-clean: clean
 
 SHELL_ARGS := ERL_FLAGS=\" -args_file config/vm.args -config config/sys.config\" rebar3 shell
 run:
-ifeq ($(MAKECMDGOALS),up)
+ifeq ($(MAKECMDGOALS),run)
 	@$(EXEC) "$(EXEC_ARGS) $(SHELL_ARGS)"
 else
 	@$(EXEC) "$(EXEC_ARGS) $(SHELL_ARGS) $(filter-out $@,$(MAKECMDGOALS))"

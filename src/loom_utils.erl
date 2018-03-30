@@ -9,15 +9,26 @@
 -module(loom_utils).
 -author("vdasari").
 
--include("loom_api.hrl").
+-include_lib("loom/include/loom_api.hrl").
+-include_lib("loom/include/logger.hrl").
+
 %% API
 -export([]).
 
 %% API
--export([pretty_print/1, record_to_proplist/1, record_to_proplist/2, proc_name/2]).
+-export([pretty_print/1, record_to_proplist/1, record_to_proplist/2, proc_name/2, backtrace/0]).
 
 proc_name(Module, #switch_info_t{switch_id = SwitchId}) ->
     list_to_atom(atom_to_list(Module) ++ "_" ++ integer_to_list(SwitchId)).
+
+backtrace() ->
+    try throw({ok,whocalledme})
+    catch
+        _:_ ->
+            StackTrace = erlang:get_stacktrace(),
+            ?INFO("StackTrace ~n~s",
+                [pretty_print(StackTrace)])
+    end.
 
 pretty_print(Item) ->
     io_lib:format("~s",[io_lib_pretty:print(Item)]).
