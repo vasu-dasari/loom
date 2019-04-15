@@ -4,7 +4,10 @@ DOCKER_COMPOSE=COMPOSE_IGNORE_ORPHANS=true $(shell which docker-compose)
 DOCKER_COMPOSE_FILE = docker/docker-compose.yml
 
 EXEC_ARGS=cd $(shell pwd) &&
-ifeq ($(DOCKER),)
+
+ifneq (,$(wildcard _build/.localbuild))
+    EXEC := bash -c
+else ifeq ($(DOCKER),)
     EXEC := bash -c
 else
     EXEC := $(DOCKER) exec -it $(PROJECT_NAME) bash -c

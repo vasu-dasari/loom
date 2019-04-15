@@ -8,6 +8,10 @@ include docker/Makefile
 
 REBAR := $(EXEC_ARGS) rebar3
 
+local:
+	@mkdir -p _build
+	@touch _build/.localbuild
+
 compile:
 	@$(EXEC) "$(REBAR) compile"
 
@@ -19,7 +23,7 @@ update:
 clean:
 	@$(EXEC) "$(REBAR) clean"
 
-deep-clean: clean
+deep-clean:
 	@rm -rf _build rebar.lock
 
 SHELL_ARGS := ERL_FLAGS=\" -args_file config/vm.args -config config/sys.config\" rebar3 shell

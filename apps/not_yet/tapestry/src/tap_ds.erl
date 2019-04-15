@@ -280,9 +280,9 @@ push_nci(Digraph, _NumVertices) ->
                                     calendar:universal_time()),
                 CleanupFn(G)
             catch
-                T:E ->
+                T:E:S ->
                     ?ERROR("Community Detection Error:~n~p:~p~n~p~n",
-                                            [T, E, erlang:get_stacktrace()]),
+                                            [T, E, S]),
                     error(E)
             end
         end),

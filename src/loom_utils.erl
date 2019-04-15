@@ -24,8 +24,7 @@ proc_name(Module, #switch_info_t{switch_id = SwitchId}) ->
 backtrace() ->
     try throw({ok,whocalledme})
     catch
-        _:_ ->
-            StackTrace = erlang:get_stacktrace(),
+        _:_:StackTrace ->
             ?INFO("StackTrace ~n~s",
                 [pretty_print(StackTrace)])
     end.
