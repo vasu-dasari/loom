@@ -127,7 +127,7 @@ process_cast(Request, State) ->
     {noreply, State}.
 
 process_info_msg({init}, #state{switch_info = #switch_info_t{datapath_id = DatapathId}} = State) ->
-    ?INFO("Initializing switch~n~p", [State]),
+    ?INFO("~p: Initializing l2switch", [element(2, erlang:process_info(self(), registered_name))]),
     loom_logic:filter(add, DatapathId,
         #loom_pkt_desc_t{
         }, self()),
@@ -177,7 +177,7 @@ do_process_rx_packet(PortId, Packet, #state{l2_table = L2Table} = State) ->
 do_forward_packet(DstMac, VlanId, Packet, #state{l2_table = L2Table} = State) ->
     case maps:get({DstMac, VlanId}, L2Table, []) of
         [] ->
-            loom_logic:sync_send(?switch_id(State),
+            loom_logic:send(?switch_id(State),
                 of_msg_lib:send_packet(?version(State),
                     Packet,
                     'controller',
@@ -194,7 +194,7 @@ do_learn_mac(PortId, SrcMac, VlanId, #state{l2_table = L2Table} = State) ->
                 true -> [{eth_dst, SrcMac}];
                 _ -> [{eth_dst, SrcMac}, {vlan_vid, VlanId}]
             end,
-            loom_logic:sync_send(?switch_id(State),
+            loom_logic:send(?switch_id(State),
                 of_msg_lib:flow_add(?version(State),
                     Match,
                     [{apply_actions, [

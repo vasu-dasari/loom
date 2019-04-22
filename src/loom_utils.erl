@@ -16,7 +16,16 @@
 -export([]).
 
 %% API
--export([pretty_print/1, record_to_proplist/1, record_to_proplist/2, proc_name/2, backtrace/0]).
+-export([pretty_print/1,record_to_proplist/1,record_to_proplist/2,proc_name/2,backtrace/0,is_link_up/1]).
+
+is_link_up(PortDesc) when is_list(PortDesc)->
+    case (lists:member(port_down, proplists:get_value(config,PortDesc, [])) or
+        lists:member(link_down, proplists:get_value(state,PortDesc, []))) of
+        true -> down;
+        _ -> up
+    end;
+is_link_up(_) ->
+    down.
 
 proc_name(Module, #switch_info_t{switch_id = SwitchId}) ->
     list_to_atom(atom_to_list(Module) ++ "_" ++ integer_to_list(SwitchId)).

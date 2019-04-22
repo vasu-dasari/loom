@@ -39,5 +39,6 @@
 -record(port_info_t, {
     name,
     port_no,
+    hw_addr,
     state
 }).

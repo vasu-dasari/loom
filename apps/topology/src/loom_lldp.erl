@@ -53,7 +53,6 @@ init(
             switch_id = SwitchId,
             datapath_id = DpId
         } = SwitchInfo) ->
-    ?INFO("Starting OpenFlow lldp process for switch ~s, id ~p", [DpId, SwitchId]),
     {ok, #state{
         switch_info = SwitchInfo
     }}.
@@ -74,7 +73,7 @@ handle_message(started, State) ->
         ]}],
         [{priority, 16#ffff}]       %% Priority of 16#ffff
     ),
-    loom_logic:sync_send(?switch_id(State), Request),
+    loom_logic:send(?switch_id(State), Request),
 
     loom_logic:filter(add, ?datapath_id(State), port_status, self()),
 
@@ -84,7 +83,7 @@ handle_message(started, State) ->
 
 handle_message({tx_packet, IfName, TxData}, #state{if_map = IfMap} = State) ->
     #{IfName := #lldp_loom_intf_t{if_index = IfIndex}} = IfMap,
-    loom_logic:sync_send(?switch_id(State), [
+    loom_logic:send(?switch_id(State), [
         send_packet, TxData, 'controller', [{output, IfIndex, no_buffer}]
     ]),
     {ok, State};
@@ -104,24 +103,9 @@ handle_message({notify, port_status, _InPort, add, PortDesc}, State) ->
 handle_message({notify, port_status, _InPort, delete, PortDesc}, State) ->
     {ok, disable_lldp(proplists:get_value(name, PortDesc), PortDesc, State)};
 
-handle_message({notify, port_status, _InPort, _Reason, PortDesc}, #state{if_map = IfMap} = State) ->
+handle_message({notify, port_status, _InPort, _Reason, PortDesc}, State) ->
     IfName = proplists:get_value(name, PortDesc),
-    StateValue = proplists:get_value(state, PortDesc),
-    OperState = case lists:member(live, StateValue) of
-        true ->
-            up;
-        _ ->
-            case lists:member(link_down, StateValue) of true -> down; _ -> ignore end
-    end,
-
-    case maps:get(IfName, IfMap, []) of
-        #lldp_loom_intf_t{} when OperState == up ->
-            lldp_handler:interface(update, IfName, up);
-        #lldp_loom_intf_t{} when OperState == down ->
-            lldp_handler:interface(update, IfName, down);
-        _ ->
-            State
-    end,
+    lldp_handler:interface(update, IfName, loom_utils:is_link_up(PortDesc)),
     {ok, State};
 
 handle_message(Message, State) ->
@@ -150,7 +134,7 @@ terminate(_Reason, State) ->
         ],
         [{priority, 16#ffff}]       %% Priority of 16#ffff
     ),
-    loom_logic:sync_send(?switch_id(State), Request),
+    loom_logic:send(?switch_id(State), Request),
 
     loom_logic:filter(delete, ?datapath_id(State), port_status, self()),
 

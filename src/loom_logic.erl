@@ -32,7 +32,7 @@
     ofsh_handle_error/2,
     ofsh_terminate/1,
     switches/0,
-    sync_send/2,
+    sync_send/2, send/2,
     connect/2,
     close_connection/1,
     set_default/1,
@@ -223,6 +223,10 @@ switches() ->
 sync_send(SwitchKey, Msg) ->
     gen_server:call(?SERVER, {sync_send, SwitchKey, Msg}).
 
+-spec send(switch_key() | default, ofp_message()) -> {ok, no_reply | ofp_message()} | {error, error_reason()}.
+send(SwitchKey, Msg) ->
+    gen_server:cast(?SERVER, {send, SwitchKey, Msg}).
+
 -spec connect(ipaddress(), inet:port_number()) -> ok | {error, error_reason()}.
 connect(IpAddr, Port) ->
     case of_driver:connect(IpAddr, Port) of
@@ -339,11 +343,8 @@ process_call({terminate, DatapathId}, #loom_logic_state{switches_table = Table} 
     end,
     {reply, ok, State};
 
-process_call({sync_send, SwitchKey, Msg}, State) when is_record(Msg, ofp_message) ->
-    {reply, do_sync_send(find_switch(SwitchKey, State), Msg, State), State};
 process_call({sync_send, SwitchKey, Msg}, State) ->
-    {reply, do_sync_send_api(sync, find_switch(SwitchKey, State), Msg, State), State};
-
+    {reply, do_send(sync, find_switch(SwitchKey, State), Msg, State), State};
 process_call({close_connection, SwitchKey}, State) ->
     {reply, do_close_connection(SwitchKey, State), State};
 process_call({set_default, SwitchKey}, State) ->
@@ -387,6 +388,10 @@ process_call(Request, State) ->
     ?INFO("call: Unhandled Request ~p", [Request]),
     {reply, ok, State}.
 
+process_cast({send, SwitchKey, Msg}, State) ->
+    do_send(async, find_switch(SwitchKey, State), Msg, State),
+    {noreply, State};
+
 process_cast(Request, State) ->
     ?INFO("cast: Request~n~p", [Request]),
     {noreply, State}.
@@ -426,7 +431,7 @@ do_default_flows(#loom_switch_info_t{key = SwitchId, version = Version}, State) 
         ]}],
         [{priority,0}]       %% Priority of 16#0
     ),
-    do_sync_send(SwitchId, Request, State).
+    do_send(sync, SwitchId, Request, State).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions
@@ -437,7 +442,7 @@ do_register({init, IpAddress, DatapathId, _Features, Version, Connection},
             switches_table = Switches,
             next_switch_key = SwitchId
         }) ->
-    SwitchInfo = #loom_switch_info_t{
+    InitSwitchInfo = #loom_switch_info_t{
         key = SwitchId,
         ip_addr = IpAddress,
         datapath_id = DatapathId,
@@ -445,11 +450,14 @@ do_register({init, IpAddress, DatapathId, _Features, Version, Connection},
         connection = Connection
     },
 
-    true = ets:insert(Switches,
-        SwitchInfo#loom_switch_info_t{
-            clients = do_start_apps(SwitchInfo),
-            ports_map = do_get_ports_info(SwitchInfo, State)
-        }),
+    SwitchInfo = InitSwitchInfo#loom_switch_info_t{
+        clients = do_start_apps(InitSwitchInfo),
+        ports_map = do_get_ports_info(InitSwitchInfo,State)
+    },
+
+    true = ets:insert(Switches, SwitchInfo),
+
+    do_initialize_ports(SwitchInfo, State),
 
     do_default_flows(SwitchInfo, State),
 
@@ -546,8 +554,27 @@ do_close_connection(#loom_switch_info_t{datapath_id = DatapathId}, _State) ->
 do_close_connection(SwitchKey, State) ->
     do_close_connection(find_switch(SwitchKey, State), State).
 
-do_sync_send_api(_, SwitchInfo, Msg, State) when is_record(Msg, ofp_message)->
-    case do_sync_send(SwitchInfo, Msg, State) of
+do_send(_, Error = not_found, _Msg, _State) ->
+    Error;
+do_send(_, #loom_switch_info_t{connection = down}, _Msg, _State) ->
+    ok;
+do_send(Type, SwitchKey, Msg, State) when is_integer(SwitchKey) ->
+    do_send(Type, find_switch(SwitchKey, State), Msg, State);
+do_send(Type, #loom_switch_info_t{version = Version} = SwitchInfo, [Function | Args], State)
+    when not is_record(Function, ofp_message) ->
+    OfpMsg = erlang:apply(of_msg_lib, Function, [Version] ++ Args),
+    do_send(Type, SwitchInfo, OfpMsg, State);
+do_send(Type, #loom_switch_info_t{version = Version} = SwitchInfo, Function, State) when is_atom(Function) ->
+    OfpMsg = erlang:apply(of_msg_lib, Function, [Version]),
+    do_send(Type, SwitchInfo, OfpMsg, State);
+do_send(sync, #loom_switch_info_t{datapath_id = DatapathId}, Msg, _State) ->
+    Ret = case is_list(Msg) of
+        true ->
+            ofs_handler:sync_send_list(DatapathId, Msg);
+        _ ->
+            ofs_handler:sync_send(DatapathId, Msg)
+    end,
+    case Ret of
         {ok, OfpMsg} when is_record(OfpMsg, ofp_message) ->
             of_msg_lib:decode(OfpMsg);
         {ok, _} ->
@@ -555,32 +582,13 @@ do_sync_send_api(_, SwitchInfo, Msg, State) when is_record(Msg, ofp_message)->
         R ->
             R
     end;
-do_sync_send_api(_, #loom_switch_info_t{version = Version} = SwitchInfo, Msg, State) ->
-    {Function, Args} = case Msg of
-        [F|A] ->
-            {F, A};
-        F ->
-            {F, []}
-    end,
-
-    case do_sync_send(SwitchInfo,
-        erlang:apply(of_msg_lib, Function, [Version] ++ Args), State) of
-        {ok, OfpMsg} when is_record(OfpMsg, ofp_message) ->
-            of_msg_lib:decode(OfpMsg);
-        {ok, _} ->
-            ok;
-        R ->
-            R
+do_send(async, #loom_switch_info_t{datapath_id = DatapathId}, Msg, _State) ->
+    case is_list(Msg) of
+        true ->
+            ofs_handler:send_list(DatapathId, Msg);
+        _ ->
+            ofs_handler:send(DatapathId, Msg)
     end.
-
-do_sync_send(Error = not_found, _Msg, _State) ->
-    Error;
-do_sync_send(#loom_switch_info_t{connection = down}, _Msg, _State) ->
-    ok;
-do_sync_send(#loom_switch_info_t{datapath_id = DatapathId}, Msg, _State) ->
-    ofs_handler:sync_send(DatapathId, Msg);
-do_sync_send(SwitchKey, Msg, State) ->
-    do_sync_send(find_switch(SwitchKey, State), Msg, State).
 
 do_subscribe(Error = {error, _}, _Msg, _State) ->
     Error;
@@ -641,7 +649,7 @@ do_get_ports_info(
             version = Version
         } = SwitchInfo, State) ->
     {port_desc_reply, _, [{flags, _}, {ports, PortList}]} =
-        do_sync_send_api(sync, SwitchInfo,
+        do_send(sync, SwitchInfo,
             of_msg_lib:get_port_descriptions(Version), State),
 
     lists:foldl(fun
@@ -651,9 +659,36 @@ do_get_ports_info(
                 PortId => #port_info_t{
                     name = proplists:get_value(name, PropList),
                     port_no = PortId,
+                    hw_addr = proplists:get_value(hw_addr, PropList, <<>>),
                     state = lists:member(live, proplists:get_value(state, PropList, []))
                 }
             }
     end, #{}, PortList);
 do_get_ports_info(_, _) ->
     #{}.
+
+do_initialize_ports(SwitchInfo, State) ->
+    case application:get_env(?AppName, interfaces) of
+        {ok, CfgProperties} ->
+            case proplists:get_value(enable, CfgProperties, false) of
+                true ->
+                    do_enable_ports(SwitchInfo, State);
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end.
+
+do_enable_ports(
+    #loom_switch_info_t{
+        ports_map = PortsMap,
+        version = Version
+    } = SwitchInfo, State) ->
+
+    PortModCfg = PortModCfg = maps:fold(fun
+        (PortId,#port_info_t{hw_addr = HwAddr}, Acc) ->
+            [of_msg_lib:set_port_up(Version,HwAddr,PortId) | Acc]
+    end,[],PortsMap),
+    do_send(async, SwitchInfo, PortModCfg, State),
+    ok.

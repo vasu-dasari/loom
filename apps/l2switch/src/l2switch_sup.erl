@@ -80,7 +80,7 @@ stop_child(Pid) when is_pid(Pid) ->
 
 show_children() ->
     lists:foreach(fun
-        ({undefined, Pid, worker, [l2switch]}) ->
+        ({undefined, Pid, worker, _}) ->
             {_,Name} = erlang:process_info(Pid, registered_name),
             io:format("~16s  => ~p~n", [Name, Pid])
     end, supervisor:which_children(?MODULE)).
