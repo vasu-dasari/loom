@@ -10,7 +10,15 @@
         ofs_handler,
         lldp
     ]},
-    {env,[]},
+    {env,[
+        {apps, [
+            %% discovery,       %% Enable topology discovery
+            %% l2switch         %% Perform L2 switching
+        ]},
+        {interfaces, [
+            %% {enable, true}   %% Enable all interfaces by default
+        ]}
+    ]},
     {modules, []},
 
     {maintainers, []},

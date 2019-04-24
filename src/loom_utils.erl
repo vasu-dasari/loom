@@ -28,6 +28,8 @@ is_link_up(_) ->
     down.
 
 proc_name(Module, #switch_info_t{switch_id = SwitchId}) ->
+    proc_name(Module, SwitchId);
+proc_name(Module, SwitchId) when is_integer(SwitchId) ->
     list_to_atom(atom_to_list(Module) ++ "_" ++ integer_to_list(SwitchId)).
 
 backtrace() ->

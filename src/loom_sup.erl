@@ -41,7 +41,8 @@ init([]) ->
     _Shutdown = 2000,
     _Type = worker,
     {ok, {SupFlags, [
-        ?Process(loom_logic, worker)
+        ?Process(loom_logic, worker),
+        ?Process(loom_handler_sup, supervisor)
     ]}}.
 
 %%====================================================================

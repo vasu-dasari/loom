@@ -46,10 +46,14 @@
 %%% API
 %%%===================================================================
 start(SwitchInfo) ->
-    l2switch_sup:start_child(loom_utils:proc_name(?MODULE, SwitchInfo), SwitchInfo).
+    ProcName = loom_utils:proc_name(?MODULE,SwitchInfo),
+    loom_handler_sup:start_child(
+        ProcName,
+        loom_handler_sup:childspec(ProcName, ?MODULE, [ProcName, SwitchInfo])
+    ).
 
 stop(Pid) when is_pid(Pid) ->
-    l2switch_sup:stop_child(Pid);
+    loom_handler_sup:stop_child(Pid);
 stop(_) ->
     ok.
 
@@ -127,7 +131,7 @@ process_cast(Request, State) ->
     {noreply, State}.
 
 process_info_msg({init}, #state{switch_info = #switch_info_t{datapath_id = DatapathId}} = State) ->
-    ?INFO("~p: Initializing l2switch", [element(2, erlang:process_info(self(), registered_name))]),
+    ?INFO("~p: Initializing ~p", [element(2, erlang:process_info(self(), registered_name)), ?MODULE]),
     loom_logic:filter(add, DatapathId,
         #loom_pkt_desc_t{
         }, self()),
