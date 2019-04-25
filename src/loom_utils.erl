@@ -16,7 +16,7 @@
 -export([]).
 
 %% API
--export([pretty_print/1,record_to_proplist/1,record_to_proplist/2,proc_name/2,backtrace/0,is_link_up/1]).
+-export([pretty_print/1, record_to_proplist/1, record_to_proplist/2, proc_name/2, backtrace/0, is_link_up/1, whocalledme/0]).
 
 is_link_up(PortDesc) when is_list(PortDesc)->
     case (lists:member(port_down, proplists:get_value(config,PortDesc, [])) or
@@ -41,7 +41,14 @@ backtrace() ->
     end.
 
 pretty_print(Item) ->
-    io_lib:format("~s",[io_lib_pretty:print(Item)]).
+    io_lib:format("~s",[io_lib_pretty:print(record_to_proplist(Item))]).
+
+whocalledme() ->
+    try throw({ok,whocalledme})
+    catch
+        _:_:StackTrace ->
+            StackTrace
+    end.
 
 record_to_proplist(to_str, R) ->
     pretty_print(record_to_proplist(R)).
@@ -61,6 +68,8 @@ record_to_proplist(to_str, R) ->
 
 record_to_proplist({}) -> [];
 ?R2P(loom_pkt_desc_t);
+?R2P(port_info_t);
+?R2P(loom_switch_info_t);
 ?R2P(loom_notification_t);
 ?R2P(loom_event_t);
 ?R2P(switch_info_t);
@@ -69,5 +78,13 @@ record_to_proplist(List) when is_list(List) ->
         (Entry, Acc) ->
             [record_to_proplist(Entry) | Acc]
     end, [], List);
+record_to_proplist(List) when is_map(List),map_size(List) == 0 ->
+    [];
+record_to_proplist(List) when is_map(List) ->
+    [maps] ++ lists:foldr(fun
+        ({K,V}, Acc) ->
+            [{record_to_proplist(K), record_to_proplist(V)} | Acc]
+    end, [], maps:to_list(List));
+
 record_to_proplist(Rec) -> Rec.
 

@@ -19,6 +19,7 @@
 
 %% API
 
+-export([initialize/0]).
 -export([init/1, handle_message/2, terminate/2, notify/4, info/2]).
 
 -define(version(State),     (State#state.switch_info)#switch_info_t.version).

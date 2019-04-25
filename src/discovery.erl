@@ -51,7 +51,6 @@
 %%%===================================================================
 
 start(SwitchInfo) ->
-    ?INFO("~p:start(~p)", [?MODULE, SwitchInfo]),
     ProcName = loom_utils:proc_name(?MODULE,SwitchInfo),
     {ok, ChildState} = init(SwitchInfo),
     loom_handler_sup:start_child(
@@ -59,9 +58,8 @@ start(SwitchInfo) ->
         loom_handler_sup:childspec(ProcName, gen_lldp, [ProcName, ?MODULE, ChildState])
     ).
 
-
-stop(Name) when is_atom(Name) ->
-    lldp_manager:stop_handler(Name).
+stop(Pid) ->
+    loom_handler_sup:stop_child(Pid).
 
 info(SwitchKey) ->
     io:format("~s", [gen_lldp:info(loom_utils:proc_name(?MODULE, SwitchKey), {info,dashboard})]).
@@ -219,7 +217,7 @@ populate_system_info(State) ->
         sys_descr = list_to_binary(lists:flatten(SysDescr))
     }.
 
-scan_ifs(State) ->
+scan_ifs(#state{switch_info = #switch_info_t{ports_map = PortsMap}} = State) ->
     {port_desc_reply, _, [{flags,_}, {ports,PortList}]} =
         loom_logic:sync_send(?switch_id(State), get_port_descriptions),
     lists:foldl(fun

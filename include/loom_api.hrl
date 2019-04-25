@@ -33,7 +33,8 @@
     switch_id   :: switch_id(),
     ip_addr     :: ipaddress(),
     datapath_id :: datapath_id(),
-    version     :: of_version()
+    version     :: of_version(),
+    ports_map
 }).
 
 -record(port_info_t, {
@@ -41,4 +42,15 @@
     port_no,
     hw_addr,
     state
+}).
+
+-record(loom_switch_info_t, {
+    key             :: {id, integer()},
+    ip_addr,
+    datapath_id,
+    version,
+    filters = #{},
+    clients = #{},
+    ports_map = #{},
+    connection
 }).

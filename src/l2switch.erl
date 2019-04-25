@@ -52,10 +52,8 @@ start(SwitchInfo) ->
         loom_handler_sup:childspec(ProcName, ?MODULE, [ProcName, SwitchInfo])
     ).
 
-stop(Pid) when is_pid(Pid) ->
-    loom_handler_sup:stop_child(Pid);
-stop(_) ->
-    ok.
+stop(Pid) ->
+    loom_handler_sup:stop_child(Pid).
 
 start_link(ProcName, SwitchInfo) ->
     gen_server:start_link({local, ProcName}, ?MODULE, [SwitchInfo], []).
@@ -130,14 +128,14 @@ process_cast(Request, State) ->
     ?INFO("cast: Request~n~p", [Request]),
     {noreply, State}.
 
-process_info_msg({init}, #state{switch_info = #switch_info_t{datapath_id = DatapathId}} = State) ->
+process_info_msg({init}, #state{switch_info = #switch_info_t{datapath_id = DatapathId, ports_map = PortsMap}} = State) ->
     ?INFO("~p: Initializing ~p", [element(2, erlang:process_info(self(), registered_name)), ?MODULE]),
     loom_logic:filter(add, DatapathId,
         #loom_pkt_desc_t{
         }, self()),
 
     {noreply, State#state{
-        if_list = loom_logic:get_ports_info(DatapathId)
+        if_list = PortsMap
     }};
 
 process_info_msg({rx_packet, PortId, Packet}, State) ->
