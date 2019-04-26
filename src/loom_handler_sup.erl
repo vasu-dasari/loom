@@ -104,6 +104,5 @@ do_add_child(ChildSpec) ->
     supervisor:start_child(?SERVER, ChildSpec).
 
 do_delete_child(Pid) ->
-    gen_server:stop(Pid),
     ok = supervisor:terminate_child(?SERVER, Pid),
     ok = supervisor:delete_child(?SERVER, Pid).

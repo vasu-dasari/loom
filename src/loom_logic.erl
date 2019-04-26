@@ -18,7 +18,7 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 
 %% API
--export([start_link/0, start_link/2]).
+-export([start_link/0, start_link/2, stop/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -39,7 +39,7 @@
 
 -export([get_switch/1, get_ports_info/1]).
 
--export([filter/4, find_loom/1]).
+-export([filter/4, find_loom/1, find_proc/2]).
 
 -define(AppName, loom).
 -define(EtsLoom, ets_loom).
@@ -201,7 +201,7 @@ ofsh_handle_error(DatapathId, Reason) ->
 ofsh_terminate(DatapathId) ->
     % lost the main connection
     ?INFO("Switch ~s is disconnected: ~p", [DatapathId, find_loom(DatapathId)]),
-    ok = stop(find_loom(DatapathId)).
+    ok = gen_server:call(?MODULE, {stop, DatapathId}).
 
 %% ----------------------------------------------------------------------------
 %% Utility API
@@ -232,15 +232,18 @@ connect(IpAddr, Port) ->
         Error -> Error
     end.
 
+find_proc(AppName, SwitchKey) ->
+    case get_switch(SwitchKey) of
+        #loom_switch_info_t{clients = #{AppName := Proc}} -> Proc;
+        _ -> not_found
+    end.
+
 find_loom(SwitchKey) when is_integer(SwitchKey) ->
     loom_utils:proc_name(?MODULE, SwitchKey);
 find_loom(DataPathId) ->
     case ets:match_object(?EtsLoom, #loom_switch_info_t{datapath_id = DataPathId, _='_'}) of
         [#loom_switch_info_t{key = SwitchKey}] -> find_loom(SwitchKey);
-        R ->
-            ?INFO("R ~p, ~s", [DataPathId, loom_utils:pretty_print(R)]),
-            ?INFO("~s", [loom_utils:pretty_print(loom_utils:whocalledme())]),
-            not_found
+        _ -> not_found
     end.
 
 -spec close_connection(switch_key() | default) -> ok | {error, error_reason()}.
@@ -257,6 +260,11 @@ get_switch(SwitchKey) when is_integer(SwitchKey) ->
     case ets:lookup(?EtsLoom, SwitchKey) of
         [] -> not_found;
         [#loom_switch_info_t{} = SwitchInfo] -> SwitchInfo
+    end;
+get_switch(DataPathId) when is_list(DataPathId) ->
+    case ets:match_object(?EtsLoom, #loom_switch_info_t{datapath_id = DataPathId, _='_'}) of
+        [#loom_switch_info_t{} = SwitchInfo] -> SwitchInfo;
+        _ -> not_found
     end;
 get_switch(#state{key = SwitchKey}) ->
     get_switch(SwitchKey).
@@ -295,6 +303,7 @@ init([#loom_switch_info_t{key = SwitchKey, datapath_id = DataPathId} = SwitchInf
     ProcName = element(2, erlang:process_info(self(), registered_name)),
     ?INFO("~p: Initializing ~p for datapath ~s", [ProcName, ?MODULE, DataPathId]),
     self() ! {register, SwitchInfo},
+    process_flag(trap_exit, true),
     {ok, #state{
         key = SwitchKey, datapath_id = DataPathId, proc_name = ProcName
     }}.
@@ -340,9 +349,8 @@ handle_info(Info, State) ->
             {noreply, State}
     end.
 
-terminate(_Reason, #state{proc_name = ProcName} = State) ->
+terminate(_Reason, #state{proc_name = ProcName}) ->
     ?INFO("~p going down: ~p", [ProcName, _Reason]),
-    do_unregister(get_switch(State)),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -362,9 +370,14 @@ process_call({filter, Op, DatapathId, Filter, Pid}, State) ->
     {reply, do_filter(Op, DatapathId, Filter, Pid), State};
 process_call(get_ports_info, State) ->
     {reply, do_get_ports_info(get_switch(State)), State};
+
 process_call({init, SwitchInfo}, #loom_logic_state{next_switch_key = SwitchKey} = State) ->
     {ok, _} = start(SwitchInfo#loom_switch_info_t{key = SwitchKey}),
     {reply, ok, State#loom_logic_state{next_switch_key = SwitchKey+1}};
+process_call({stop, DatapathId}, State) ->
+    do_unregister(get_switch(DatapathId)),
+    {reply, ok, State};
+
 process_call(Request, State) ->
     ?INFO("call: Unhandled Request ~p", [Request]),
     {reply, ok, State}.
@@ -408,7 +421,7 @@ do_register(
     do_subscribe(SwitchInfo, [packet_in, port_status]),
 
     true = ets:insert(?EtsLoom, SwitchInfo#loom_switch_info_t{
-        clients = do_start_apps(InitSwitchInfo)
+        clients = do_start_apps(SwitchInfo)
     }).
 
 do_unregister(#loom_switch_info_t{key = SwitchId, clients = Clients}) ->
@@ -453,10 +466,7 @@ do_start_apps(
 
 do_stop_apps(AppInfo) when is_map(AppInfo) ->
     lists:foreach(fun
-        ({?MODULE, _}) ->
-            ok;
-        ({Mod, Arg}) when Mod /= ?MODULE ->
-            ?INFO("~p: Stopping ~p, ~p", [?MODULE, Mod, Arg]),
+        ({Mod, Arg}) ->
             Mod:stop(Arg)
     end, maps:to_list(AppInfo)).
 

@@ -161,7 +161,7 @@ handle_message(Message, State) ->
     {ok, State}.
 
 notify(Op, IfName, EntityInfo, State) ->
-    ?INFO("~p Neighbor on ~p~n~s", [Op,IfName, lldp_utils:record_to_proplist(to_str, EntityInfo)]),
+    ?DEBUG("~p Neighbor on ~p~n~s", [Op,IfName, lldp_utils:record_to_proplist(to_str, EntityInfo)]),
     notify({Op, ?datapath_id(State), IfName, EntityInfo}),
     {ok, State}.
 
