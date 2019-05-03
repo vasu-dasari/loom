@@ -41,6 +41,7 @@
     name,
     port_no,
     hw_addr,
+    if_speed,
     state
 }).
 

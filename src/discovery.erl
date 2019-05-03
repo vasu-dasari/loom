@@ -160,9 +160,10 @@ handle_message(Message, State) ->
     ?INFO("Message: ~p", [Message]),
     {ok, State}.
 
-notify(Op, IfName, EntityInfo, State) ->
+notify(Op, IfName, EntityInfo, #state{if_map = IfMap} = State) ->
     ?DEBUG("~p Neighbor on ~p~n~s", [Op,IfName, lldp_utils:record_to_proplist(to_str, EntityInfo)]),
-    notify({Op, ?datapath_id(State), IfName, EntityInfo}),
+    #{IfName := #lldp_loom_intf_t{if_index = IfIndex}} = IfMap,
+    notify({Op, ?datapath_id(State), IfName, IfIndex, EntityInfo}),
     {ok, State}.
 
 info(_Request, _State) ->
@@ -217,7 +218,7 @@ populate_system_info(State) ->
         sys_descr = list_to_binary(lists:flatten(SysDescr))
     }.
 
-scan_ifs(#state{switch_info = #switch_info_t{ports_map = PortsMap}} = State) ->
+scan_ifs(#state{switch_info = #switch_info_t{}} = State) ->
     {port_desc_reply, _, [{flags,_}, {ports,PortList}]} =
         loom_logic:sync_send(?switch_id(State), get_port_descriptions),
     lists:foldl(fun

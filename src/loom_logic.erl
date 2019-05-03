@@ -592,6 +592,7 @@ do_get_ports_info(
                     name = proplists:get_value(name, PropList),
                     port_no = PortId,
                     hw_addr = proplists:get_value(hw_addr, PropList, <<>>),
+                    if_speed = proplists:get_value(curr_speed, PropList, 10000),
                     state = lists:member(live, proplists:get_value(state, PropList, []))
                 }
             }
