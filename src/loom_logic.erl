@@ -562,6 +562,10 @@ do_filter(add, DatapathId, PktDesc, Pid) ->
     ok.
 
 do_default_flows(#loom_switch_info_t{version = Version} = SwitchInfo) ->
+    %% Delete all flows before provisioning the switch
+    do_send(sync, SwitchInfo,
+        of_msg_lib:flow_delete(Version, [], [{table_id, 16#ff}])),
+
     Request = of_msg_lib:flow_add(
         Version,
         [],                         %% Matches: any port

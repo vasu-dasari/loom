@@ -151,7 +151,7 @@ handle_message({notify, port_status, _InPort, add, PortDesc}, State) ->
 handle_message({notify, port_status, _InPort, delete, PortDesc}, State) ->
     {ok, disable_lldp(proplists:get_value(name, PortDesc), PortDesc, State)};
 
-handle_message({notify, port_status, _InPort, _Reason, PortDesc}, State) ->
+handle_message({notify, port_status, InPort, _Reason, PortDesc}, State) when is_integer(InPort) ->
     IfName = proplists:get_value(name, PortDesc),
     gen_lldp:interface(update, IfName, loom_utils:is_link_up(PortDesc)),
     {ok, State};
