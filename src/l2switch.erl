@@ -138,7 +138,7 @@ process_info_msg({init}, #state{switch_info = #switch_info_t{datapath_id = Datap
         if_list = PortsMap
     }};
 
-process_info_msg({rx_packet, PortId, Packet}, State) ->
+process_info_msg({rx_packet, PortId, _, Packet}, State) ->
     {noreply, do_process_rx_packet(PortId, Packet, State)};
 
 process_info_msg(Request, State) ->

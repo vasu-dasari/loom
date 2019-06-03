@@ -13,6 +13,7 @@
 -type switch_id()   :: non_neg_integer().
 
 -record(loom_pkt_desc_t, {
+    cookie = dont_care,
     src_mac = dont_care,
     dst_mac = dont_care,
     ether_type = dont_care,
@@ -21,7 +22,7 @@
 
 -record(loom_notification_t, {
     key :: #loom_pkt_desc_t{},
-    dp_list = #{}
+    pid_map = #{}
 }).
 
 -record(loom_event_t, {

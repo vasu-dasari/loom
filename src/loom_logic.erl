@@ -56,6 +56,7 @@
 -record(state, {
     key,
     proc_name,
+    ets,
     datapath_id
 }).
 
@@ -107,89 +108,9 @@ ofsh_failover() ->
     ?INFO("failover"),
     ok.
 
--spec ofsh_handle_message(datapath_id(), ofp_message()) -> ok.
-ofsh_handle_message(DatapathId, {packet_in,0,PktDesc}) ->
-    <<InPort:32>> = proplists:get_value(in_port, proplists:get_value(match, PktDesc, [])),
-    try
-        handle_packet_in(DatapathId, InPort, proplists:get_value(data, PktDesc))
-    catch
-        E:R  ->
-            ?ERROR("E ~p, R ~p", [E,R])
-    end,
-    ok;
-
-ofsh_handle_message(DatapathId, {port_status,0, [{reason, Reason}, {desc, PortDesc}] = PortStatus}) ->
-    try
-        handle_port_status(DatapathId, Reason, PortDesc)
-    catch
-        E:R  ->
-            ?ERROR("E ~p, R ~p", [E,R])
-    end,
-    ?DEBUG("Port Status(~s):~n~p~n", [DatapathId, loom_utils:pretty_print(PortStatus)]),
-    ok;
 ofsh_handle_message(DatapathId, Msg) ->
-    % process a message from the switch - print and ignore
-    ?INFO("message in: ~p ~p~n", [DatapathId, Msg]),
+    ?cast(DatapathId, {message,Msg}),
     ok.
-
-handle_port_status(DatapathId, Reason, PortDesc) ->
-    InPort = proplists:get_value(port_no, PortDesc),
-    case ets:select(?EtsLoom,
-        ets:fun2ms(fun
-            (#loom_notification_t{
-                key = port_status,
-                dp_list = P
-            })  ->
-                P
-        end)) of
-        [DpMap] ->
-            ?DEBUG("~s: Event on ~p: Reason ~p, ~p~n~p", [DatapathId, InPort, Reason, PortDesc, DpMap]),
-            case maps:get(DatapathId, DpMap, []) of
-                [] ->
-                    ok;
-                Pid ->
-                    ?DEBUG("Event on ~p: Reason ~p, ~p", [InPort, Reason, Pid]),
-                    Pid ! {notify, port_status, InPort, Reason, PortDesc}
-            end;
-        _ ->
-            ok
-    end.
-
-handle_packet_in(DatapathId, InPort, <<DstMac:6/bytes, SrcMac:6/bytes, EtherType:16, _/binary>> = PktData) ->
-    ?DEBUG("Rx Packet on ~p~n~p", [InPort, EtherType]),
-    PktDesc = #loom_pkt_desc_t{
-        src_mac = SrcMac,
-        dst_mac = DstMac,
-        ether_type = EtherType
-    },
-
-    case ets:select(?EtsLoom,
-        ets:fun2ms(fun
-            (#loom_notification_t{
-                key = K,
-                dp_list = P
-            }) when
-                (is_record(K, loom_pkt_desc_t)),
-                ((K#loom_pkt_desc_t.src_mac == dont_care) or (K#loom_pkt_desc_t.src_mac == PktDesc#loom_pkt_desc_t.src_mac)),
-                ((K#loom_pkt_desc_t.dst_mac == dont_care) or (K#loom_pkt_desc_t.dst_mac == PktDesc#loom_pkt_desc_t.dst_mac)),
-                ((K#loom_pkt_desc_t.ether_type== dont_care) or (K#loom_pkt_desc_t.ether_type == PktDesc#loom_pkt_desc_t.ether_type))
-                ->
-                P
-        end)) of
-        DpList when is_list(DpList) ->
-            ?DEBUG("Rx Packet on ~p: ~p", [InPort, EtherType]),
-            lists:foreach(fun
-                (DpMap) ->
-                    case maps:get(DatapathId, DpMap, []) of
-                        [] ->
-                            ok;
-                        Pid ->
-                            Pid ! {rx_packet, InPort, PktData}
-                    end
-            end, DpList);
-        _ ->
-            ok
-    end.
 
 -spec ofsh_handle_error(datapath_id(), error_reason()) -> ok.
 ofsh_handle_error(DatapathId, Reason) ->
@@ -304,8 +225,12 @@ init([#loom_switch_info_t{key = SwitchKey, datapath_id = DataPathId} = SwitchInf
     ?INFO("~p: Initializing ~p for datapath ~s", [ProcName, ?MODULE, DataPathId]),
     self() ! {register, SwitchInfo},
     process_flag(trap_exit, true),
+
+    EtsName = erlang:list_to_atom(
+        "ets_" ++ erlang:atom_to_list(ProcName)),
     {ok, #state{
-        key = SwitchKey, datapath_id = DataPathId, proc_name = ProcName
+        key = SwitchKey, datapath_id = DataPathId, proc_name = ProcName,
+        ets = ets:new(EtsName, [named_table, {keypos, 2}, ordered_set, public])
     }}.
 
 handle_call(Request, From, State) ->
@@ -385,8 +310,17 @@ process_call(Request, State) ->
 process_cast({send, Msg}, State) ->
     do_send(async, get_switch(State), Msg),
     {noreply, State};
-process_cast({filter, Op, DatapathId, Filter, Pid}, State) ->
-    do_filter(Op, DatapathId, Filter, Pid),
+process_cast({filter, Op, _, Filter, Pid}, State) ->
+    do_filter(Op, Filter, Pid, State),
+    {noreply, State};
+
+process_cast({message, {packet_in,0,PktDesc}}, State) ->
+    <<InPort:32>> = proplists:get_value(in_port, proplists:get_value(match, PktDesc, [])),
+    handle_packet_in(InPort, PktDesc, State),
+    {noreply, State};
+
+process_cast({message,{port_status,0, PortStatus}}, State) ->
+    handle_port_status(PortStatus, State),
     {noreply, State};
 
 process_cast(Request, State) ->
@@ -522,20 +456,19 @@ do_subscribe(Error, _Msg) ->
 
 do_filter(_, not_found, _, _) ->
     not_found;
-do_filter(delete, DatapathId, NotifyKey, _) ->
-    Table = ets_loom,
+do_filter(delete, NotifyKey, Pid, #state{ets = Table}) ->
     case ets:lookup(Table, NotifyKey) of
-        [#loom_notification_t{dp_list = DpMap} = PktFilter] ->
-            case maps:get(DatapathId, DpMap, []) of
+        [#loom_notification_t{pid_map = PidMap} = PktFilter] ->
+            case maps:get(Pid, PidMap, []) of
                 [] ->
                     ok;
-                _ when map_size(DpMap) == 1 ->
+                _ when map_size(PidMap) == 1 ->
                     ets:delete(Table, NotifyKey);
                 _ ->
                     ets:insert(Table,
                         PktFilter#loom_notification_t{
                             key = NotifyKey,
-                            dp_list = maps:remove(DatapathId, DpMap)
+                            pid_map = maps:remove(Pid, PidMap)
                         }
                     )
             end;
@@ -543,20 +476,19 @@ do_filter(delete, DatapathId, NotifyKey, _) ->
             ok
     end,
     ok;
-do_filter(add, DatapathId, PktDesc, Pid) ->
-    Table = ets_loom,
+do_filter(add, PktDesc, Pid, #state{ets = Table}) ->
     case ets:lookup(Table, PktDesc) of
-        [#loom_notification_t{dp_list = PidMap} = PktFilter] ->
+        [#loom_notification_t{pid_map = PidMap} = PktFilter] ->
             ets:insert(Table,
                 PktFilter#loom_notification_t{
                     key = PktDesc,
-                    dp_list = PidMap#{DatapathId => Pid}
+                    pid_map = PidMap#{Pid => true}
                 });
         _ ->
             ets:insert(Table,
                 #loom_notification_t{
                     key = PktDesc,
-                    dp_list = #{DatapathId => Pid}
+                    pid_map = #{Pid => true}
                 })
     end,
     ok.
@@ -629,3 +561,62 @@ do_enable_ports(
     end,[],PortsMap),
     do_send(async, SwitchInfo, PortModCfg),
     ok.
+
+
+handle_port_status(PortStatus, #state{ets = Table}) ->
+    Reason = proplists:get_value(reason, PortStatus),
+    PortDesc = proplists:get_value(desc, PortStatus),
+    InPort = proplists:get_value(port_no, PortDesc),
+    case ets:select(Table,
+        ets:fun2ms(fun
+            (#loom_notification_t{
+                key = port_status,
+                pid_map = P
+            })  ->
+                P
+        end)) of
+        [PidMap] ->
+            lists:foreach(fun
+                (Pid) ->
+                    ?DEBUG("Event on ~p: Reason ~p, ~p, ~p", [InPort, Reason, PortStatus, Pid]),
+                    Pid ! {notify, port_status, InPort, Reason, PortDesc}
+            end, maps:keys(PidMap));
+        _ ->
+            ok
+    end.
+
+handle_packet_in(InPort, OfshPktDesc,  #state{ets = Table}) ->
+    <<DstMac:6/bytes, SrcMac:6/bytes, EtherType:16, _/binary>> = PktData = proplists:get_value(data, OfshPktDesc),
+    Cookie = proplists:get_value(cookie, OfshPktDesc),
+
+    ?DEBUG("Rx Packet on ~p, Cookie ~16.16.0B", [InPort, binary:decode_unsigned(Cookie)]),
+    PktDesc = #loom_pkt_desc_t{
+        cookie = Cookie,
+        src_mac = SrcMac,
+        dst_mac = DstMac,
+        ether_type = EtherType
+    },
+
+    case ets:select(Table,
+        ets:fun2ms(fun
+            (#loom_notification_t{
+                key = K,
+                pid_map = P
+            }) when
+                (is_record(K, loom_pkt_desc_t)),
+                ((K#loom_pkt_desc_t.cookie == dont_care) or (K#loom_pkt_desc_t.cookie == PktDesc#loom_pkt_desc_t.cookie)),
+                ((K#loom_pkt_desc_t.src_mac == dont_care) or (K#loom_pkt_desc_t.src_mac == PktDesc#loom_pkt_desc_t.src_mac)),
+                ((K#loom_pkt_desc_t.dst_mac == dont_care) or (K#loom_pkt_desc_t.dst_mac == PktDesc#loom_pkt_desc_t.dst_mac)),
+                ((K#loom_pkt_desc_t.ether_type== dont_care) or (K#loom_pkt_desc_t.ether_type == PktDesc#loom_pkt_desc_t.ether_type))
+                ->
+                P
+        end)) of
+        [PidMap] ->
+            ?DEBUG("Rx Packet on ~p: ~p", [InPort, EtherType]),
+            lists:foreach(fun
+                (Pid) ->
+                    Pid ! {rx_packet, InPort, Cookie, PktData}
+            end, maps:keys(PidMap));
+        _ ->
+            ok
+    end.

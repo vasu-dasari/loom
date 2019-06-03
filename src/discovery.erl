@@ -136,7 +136,7 @@ handle_message({tx_packet, IfName, TxData}, #state{if_map = IfMap} = State) ->
     ]),
     {ok, State};
 
-handle_message({rx_packet, InPort, Data} , #state{port_map = PortMap} = State) ->
+handle_message({rx_packet, InPort, _, Data} , #state{port_map = PortMap} = State) ->
     case maps:get(InPort, PortMap, []) of
         [] ->
             ok;
